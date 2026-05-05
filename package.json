@@ -1,0 +1,11 @@
+{
+  "name": "softdesk-bot",
+  "version": "1.0.0",
+  "main": "bot.js",
+  "dependencies": {
+    "playwright": "^1.40.0"
+  },
+  "scripts": {
+    "start": "node bot.js"
+  }
+}
