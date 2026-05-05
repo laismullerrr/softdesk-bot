@@ -3,9 +3,12 @@
   "version": "1.0.0",
   "main": "bot.js",
   "dependencies": {
-    "playwright": "^1.40.0"
+    "playwright": "^1.40.0",
+    "googleapis": "^133.0.0"
   },
   "scripts": {
     "start": "node bot.js"
   }
+
 }
+
