@@ -6,7 +6,10 @@ const path = require('path');
   const downloadDir = 'C:\\Users\\Lenovo\\Documents\\softdesk-bot\\downloads';
   if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir);
 
-  const browser = await chromium.launch({ headless: false }); // deixa false pra ver rodando
+  const browser = await chromium.launch({
+  headless: true,
+  args: ['--no-sandbox', '--disable-setuid-sandbox']
+}); // deixa false pra ver rodando
   const context = await browser.newContext({
     acceptDownloads: true,
   });
