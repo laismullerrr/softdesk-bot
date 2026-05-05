@@ -1,12 +1,9 @@
 const { chromium } = require('playwright');
 const { google } = require('googleapis');
-const stream = require('stream');
 
 // 🔽 valida variáveis obrigatórias
 if (!process.env.SOFTDESK_USER || !process.env.SOFTDESK_PASSWORD) {
   console.error('❌ Variáveis de ambiente não definidas!');
-  console.log('USER:', process.env.SOFTDESK_USER);
-  console.log('PASS:', process.env.SOFTDESK_PASSWORD);
   process.exit(1);
 }
 
@@ -15,8 +12,8 @@ if (!process.env.GOOGLE_CREDENTIALS) {
   process.exit(1);
 }
 
-// 🔽 função upload Google Drive
-async function uploadToDrive(buffer, fileName) {
+// 🔽 função upload Google Drive (STREAM - SEM BUFFER)
+async function uploadToDrive(stream, fileName) {
   const auth = new google.auth.GoogleAuth({
     credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
     scopes: ['https://www.googleapis.com/auth/drive.file'],
@@ -24,18 +21,15 @@ async function uploadToDrive(buffer, fileName) {
 
   const drive = google.drive({ version: 'v3', auth });
 
-  const bufferStream = new stream.PassThrough();
-  bufferStream.end(buffer);
-
   await drive.files.create({
     requestBody: {
       name: fileName,
       mimeType: 'text/csv',
-      parents: ['1C0kgl_1odFhH4oTsKj6ng-3uXoWtW7po'], // ID da pasta
+      parents: ['1C0kgl_1odFhH4oTsKj6ng-3uXoWtW7po'],
     },
     media: {
       mimeType: 'text/csv',
-      body: bufferStream,
+      body: stream, // 🔥 STREAM DIRETO
     },
   });
 
@@ -43,16 +37,23 @@ async function uploadToDrive(buffer, fileName) {
 }
 
 (async () => {
+  let browser;
+
   try {
     console.log('🚀 Iniciando navegador...');
 
-    const browser = await chromium.launch({
+    browser = await chromium.launch({
       headless: true,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-gpu'
+        '--disable-gpu',
+        '--single-process',
+        '--no-zygote',
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-renderer-backgrounding'
       ],
     });
 
@@ -64,8 +65,9 @@ async function uploadToDrive(buffer, fileName) {
 
     console.log('🔐 Acessando login...');
 
-    // LOGIN
-    await page.goto('https://dettalles.soft4.com.br/login', { waitUntil: 'domcontentloaded' });
+    await page.goto('https://dettalles.soft4.com.br/login', {
+      waitUntil: 'domcontentloaded'
+    });
 
     await page.fill('input[name="lg_usuario"]', process.env.SOFTDESK_USER);
     await page.fill('input[name="sh_usuario"]', process.env.SOFTDESK_PASSWORD);
@@ -77,14 +79,16 @@ async function uploadToDrive(buffer, fileName) {
 
     console.log('✅ Login realizado');
 
-    // RELATÓRIO
     console.log('📊 Acessando relatório...');
 
-    await page.goto('https://dettalles.soft4.com.br/informacao/assistente-de-relatorio/15/visualizar', {
-      waitUntil: 'domcontentloaded'
-    });
+    await page.goto(
+      'https://dettalles.soft4.com.br/informacao/assistente-de-relatorio/15/visualizar',
+      { waitUntil: 'domcontentloaded' }
+    );
 
-    await page.waitForSelector('button:has-text("Excel")', { timeout: 15000 });
+    await page.waitForSelector('button:has-text("Excel")', {
+      timeout: 20000
+    });
 
     console.log('⬇️ Baixando arquivo...');
 
@@ -95,27 +99,26 @@ async function uploadToDrive(buffer, fileName) {
 
     const fileName = `relatorio_${new Date().toISOString().slice(0, 10)}.csv`;
 
-    const downloadStream = await download.createReadStream();
-    const chunks = [];
-
-    for await (const chunk of downloadStream) {
-      chunks.push(chunk);
-    }
-
-    const buffer = Buffer.concat(chunks);
-
     console.log('☁️ Enviando para Google Drive...');
 
-    await uploadToDrive(buffer, fileName);
+    const downloadStream = await download.createReadStream();
 
-    await browser.close();
+    await uploadToDrive(downloadStream, fileName);
 
     console.log('🎉 Processo finalizado com sucesso');
+
+    await context.close();
+    await browser.close();
 
     process.exit(0);
 
   } catch (error) {
     console.error('❌ ERRO NO PROCESSO:', error);
+
+    if (browser) {
+      await browser.close();
+    }
+
     process.exit(1);
   }
 })();
