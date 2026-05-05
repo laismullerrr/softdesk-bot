@@ -2,6 +2,19 @@ const { chromium } = require('playwright');
 const { google } = require('googleapis');
 const stream = require('stream');
 
+// 🔽 valida variáveis obrigatórias
+if (!process.env.SOFTDESK_USER || !process.env.SOFTDESK_PASSWORD) {
+  console.error('❌ Variáveis de ambiente não definidas!');
+  console.log('USER:', process.env.SOFTDESK_USER);
+  console.log('PASS:', process.env.SOFTDESK_PASSWORD);
+  process.exit(1);
+}
+
+if (!process.env.GOOGLE_CREDENTIALS) {
+  console.error('❌ GOOGLE_CREDENTIALS não definido!');
+  process.exit(1);
+}
+
 // 🔽 função upload Google Drive
 async function uploadToDrive(buffer, fileName) {
   const auth = new google.auth.GoogleAuth({
@@ -18,7 +31,7 @@ async function uploadToDrive(buffer, fileName) {
     requestBody: {
       name: fileName,
       mimeType: 'text/csv',
-      parents: ['1C0kgl_1odFhH4oTsKj6ng-3uXoWtW7po'], // 🔥 COLOCA O ID DA PASTA
+      parents: ['1C0kgl_1odFhH4oTsKj6ng-3uXoWtW7po'], // ID da pasta
     },
     media: {
       mimeType: 'text/csv',
@@ -26,67 +39,83 @@ async function uploadToDrive(buffer, fileName) {
     },
   });
 
-  console.log('Upload para Google Drive concluído');
+  console.log('✅ Upload para Google Drive concluído');
 }
 
 (async () => {
-  const browser = await chromium.launch({
-  headless: true,
-  args: [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
-    '--disable-gpu',
-    '--disable-software-rasterizer',
-    '--disable-extensions',
-    '--disable-background-networking',
-    '--disable-background-timer-throttling',
-    '--disable-renderer-backgrounding'
-  ],
-});
+  try {
+    console.log('🚀 Iniciando navegador...');
 
-  const context = await browser.newContext({
-    acceptDownloads: true,
-  });
+    const browser = await chromium.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
+      ],
+    });
 
-  const page = await context.newPage();
+    const context = await browser.newContext({
+      acceptDownloads: true,
+    });
 
-  // 🔐 LOGIN
-  await page.goto('https://dettalles.soft4.com.br/login');
+    const page = await context.newPage();
 
- await page.fill('input[name="lg_usuario"]', process.env.SOFTDESK_USER);
-  await page.fill('input[name="sh_usuario"]', process.env.SOFTDESK_PASSWORD);
-  await page.getByRole('button', { name: 'Atendente' }).click();
+    console.log('🔐 Acessando login...');
 
-  await page.waitForLoadState('networkidle');
+    // LOGIN
+    await page.goto('https://dettalles.soft4.com.br/login', { waitUntil: 'domcontentloaded' });
 
-  // 📊 IR PARA RELATÓRIO
-  await page.goto('https://dettalles.soft4.com.br/informacao/assistente-de-relatorio/15/visualizar');
+    await page.fill('input[name="lg_usuario"]', process.env.SOFTDESK_USER);
+    await page.fill('input[name="sh_usuario"]', process.env.SOFTDESK_PASSWORD);
 
-  await page.waitForSelector('button:has-text("Excel")');
+    await Promise.all([
+      page.waitForNavigation(),
+      page.getByRole('button', { name: 'Atendente' }).click()
+    ]);
 
-  // ⬇️ DOWNLOAD
-  const [download] = await Promise.all([
-    page.waitForEvent('download'),
-    page.click('button:has-text("Excel")')
-  ]);
+    console.log('✅ Login realizado');
 
-  const fileName = `relatorio_${new Date().toISOString().slice(0,10)}.csv`;
+    // RELATÓRIO
+    console.log('📊 Acessando relatório...');
 
-  // 🔽 pega arquivo em memória (SEM salvar local)
-  const downloadStream = await download.createReadStream();
-  const chunks = [];
+    await page.goto('https://dettalles.soft4.com.br/informacao/assistente-de-relatorio/15/visualizar', {
+      waitUntil: 'domcontentloaded'
+    });
 
-  for await (const chunk of downloadStream) {
-    chunks.push(chunk);
+    await page.waitForSelector('button:has-text("Excel")', { timeout: 15000 });
+
+    console.log('⬇️ Baixando arquivo...');
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.click('button:has-text("Excel")')
+    ]);
+
+    const fileName = `relatorio_${new Date().toISOString().slice(0, 10)}.csv`;
+
+    const downloadStream = await download.createReadStream();
+    const chunks = [];
+
+    for await (const chunk of downloadStream) {
+      chunks.push(chunk);
+    }
+
+    const buffer = Buffer.concat(chunks);
+
+    console.log('☁️ Enviando para Google Drive...');
+
+    await uploadToDrive(buffer, fileName);
+
+    await browser.close();
+
+    console.log('🎉 Processo finalizado com sucesso');
+
+    process.exit(0);
+
+  } catch (error) {
+    console.error('❌ ERRO NO PROCESSO:', error);
+    process.exit(1);
   }
-
-  const buffer = Buffer.concat(chunks);
-
-  console.log('Download concluído, enviando para Drive...');
-
-  // ☁️ envia pro Google Drive
-  await uploadToDrive(buffer, fileName);
-
-  await browser.close();
 })();
